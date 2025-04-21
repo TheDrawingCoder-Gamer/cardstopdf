@@ -1,2 +1,4 @@
 reportlab
 Pillow
+requests
+pathvalidate

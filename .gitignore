@@ -1,3 +1,4 @@
 *.pdf
 input
 vendor
+*.csv
