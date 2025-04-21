@@ -99,7 +99,11 @@ elif args.subparser == "deck":
     with open(args.deck, "r") as deck:
         deck_csv = csv.reader(deck)
         for row in deck_csv:
-            da_uris = uris(row[1], row[2], row[3], basic_lands=args.basic_lands)
+            da_uris = True
+            if len(row) > 4:
+                da_uris = [(filename_of_card(row[1], row[2], row[3]), {"local_file": row[4] })]
+            else:
+                da_uris = uris(row[1], row[2], row[3], basic_lands=args.basic_lands)
             for x in range(int(row[0])):
                 image_uris.extend(da_uris)
 
@@ -108,10 +112,15 @@ elif args.subparser == "deck":
         for idx, (_, image) in enumerate(images):
             y = vert_bleed_edge + math.floor(idx / 3) * (card_height + card_spacing)
             x = horz_bleed_edge + (idx % 3) * (card_width + card_spacing)
+           
+            # I LOVE FREAK TYPING
+            if "local_file" in image:
+               
+                canvas.drawInlineImage(image["local_file"], x, y, card_width, card_height)
+            else:
+                r = requests.get(image)
 
-            r = requests.get(image)
-
-            canvas.drawInlineImage(PilImage.open(BytesIO(r.content)), x, y, card_width, card_height)
+                canvas.drawInlineImage(PilImage.open(BytesIO(r.content)), x, y, card_width, card_height)
 
     for batch in itertools.batched(image_uris, 9):
         draw_image_batch(canvas, batch)
