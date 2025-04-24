@@ -2,3 +2,7 @@
 input
 vendor
 *.csv
+cache
+*.png
+*.jpeg
+*.jpg
