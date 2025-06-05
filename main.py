@@ -9,6 +9,7 @@ import os
 import argparse
 import csv
 import requests
+import collections
 from pathvalidate import sanitize_filename
 from io import BytesIO
 import time
@@ -30,7 +31,7 @@ deck_parser.add_argument("--deck", "--input", help="Deck CSV (quantity, name, se
 deck_parser.add_argument("--cache", dest="cache", default="cache", help="Override cache dir (default 'cache')")
 deck_parser.add_argument("--nocache", dest="cache", action="store_const", const=None, help="Disable caching")
 deck_parser.add_argument("--include-basic-lands", dest="basic_lands", action="store_true", help="By default, basic lands are excluded. Use this to include them.")
-
+deck_parser.add_argument("--unpair-mdfc", dest="pair_mdfc", action="store_false", help="By default, MDFCs will be moved around so that they are side by side. Use this to disable that.")
 
 args = parser.parse_args()
 
@@ -50,7 +51,7 @@ vert_bleed_edge = 0.15 * inch
 
 canvas = canvas.Canvas(args.output, pagesize=portrait(letter))
 
-def cache_check(set_code, collector_num):
+def cache_check(set_code, collector_num, basic_lands=False):
     if not args.cache:
         return None
 
@@ -59,18 +60,20 @@ def cache_check(set_code, collector_num):
     if os.path.exists(cache_file):
         with open(cache_file, "r") as txt:
             data = json.load(txt)
-            return [{ "local_file": os.path.join(args.cache, file)} for file in data["images"]]
+            if "basic_land" in data and data["basic_land"] and not basic_lands:
+                return []
+            else:
+                return [{ "local_file": os.path.join(args.cache, file)} for file in data["images"]]
 
 
 
     return None
 
-def save_cache(set_code, collector_num, uris):
-    if not uris:
-        # If it empty dont save it
-        return []
+def save_cache(set_code, collector_num, basic_lands=False):
+    infos = freaky_uris(set_code, collector_num)
+
     images = []
-    for idx, uri in enumerate(uris):
+    for idx, uri in enumerate(infos["images"]):
         r = requests.get(uri, headers=headers)
         
         image_file = f"{set_code} {collector_num} {idx}.png"
@@ -80,9 +83,12 @@ def save_cache(set_code, collector_num, uris):
         images.append(image_file)
 
     with open(os.path.join(args.cache, f"{set_code} {collector_num}.json"), "w") as txt:
-        json.dump({"images": images}, txt)
+        json.dump({"basic_land": infos["basic_land"], "images": images}, txt)
 
-    return [{"local_file": os.path.join(args.cache, image)} for image in images]
+    if infos["basic_land"] and not basic_lands:
+        return []
+    else:
+        return [{"local_file": os.path.join(args.cache, image)} for image in images]
 
 def filename_of_card(name, set_code, collector_num):
     return sanitize_filename(f"{name} ({set_code} {collector_num})")
@@ -102,6 +108,16 @@ def uris_of_data(data):
         failed.append(data["name"] + " - no image found. This tool probably doesn't support this kind of card.")
         return []
 
+def freaky_uris(set_code, collector_num):
+    da_url = f"https://api.scryfall.com/cards/{set_code}/{collector_num}"
+    r = requests.get(da_url, headers=headers)
+
+    time.sleep(0.1)
+
+    data = r.json()
+
+    return { "basic_land": ("Basic Land" in data["type_line"]), "images": uris_of_data(data) }
+
 def uris(name, set_code, collector_num, basic_lands=False):
     da_url = f"https://api.scryfall.com/cards/{set_code}/{collector_num}"
     r = requests.get(da_url, headers=headers)
@@ -111,6 +127,7 @@ def uris(name, set_code, collector_num, basic_lands=False):
     
     data = r.json()
 
+    # TODO: this breaks with cache
     if (not basic_lands) and "Basic Land" in data["type_line"]:
         # empty so i dont crash : (
         return []
@@ -142,37 +159,70 @@ elif args.subparser == "deck":
                 da_uris = [{"local_file": row[4] }]
             else:
                 if args.cache:
-                    cache_res = cache_check(row[2], row[3])
+                    cache_res = cache_check(row[2], row[3], basic_lands=args.basic_lands)
                     if cache_res:
                         da_uris = cache_res
                     else:
-                        da_uris = save_cache(row[2], row[3], uris(row[1], row[2], row[3], basic_lands=args.basic_lands))
+                        da_uris = save_cache(row[2], row[3], basic_lands=args.basic_lands)
                 else:
                     da_uris = uris(row[1], row[2], row[3], basic_lands=args.basic_lands)
             for x in range(int(row[0])):
-                image_uris.extend(da_uris)
+                # append for MDFC
+                image_uris.append(da_uris)
+    
+
 
     def draw_image_batch(canvas, images):
         
         for idx, image in enumerate(images):
-            y = vert_bleed_edge + math.floor(idx / 3) * (card_height + card_spacing)
-            x = horz_bleed_edge + (idx % 3) * (card_width + card_spacing)
-           
-            # I LOVE FREAK TYPING
-            if "local_file" in image:
+            if image:
+                y = vert_bleed_edge + math.floor(idx / 3) * (card_height + card_spacing)
+                x = horz_bleed_edge + (idx % 3) * (card_width + card_spacing)
                
-                canvas.drawInlineImage(image["local_file"], x, y, card_width, card_height)
+                # I LOVE FREAK TYPING
+                if "local_file" in image:
+                   
+                    canvas.drawInlineImage(image["local_file"], x, y, card_width, card_height)
+                else:
+                    r = requests.get(image)
+
+                    canvas.drawInlineImage(PilImage.open(BytesIO(r.content)), x, y, card_width, card_height)
+    
+    output_images = []
+    if args.pair_mdfc:
+        mdfcs = collections.deque()
+        non_mdfcs = collections.deque()
+        for card in image_uris:
+            if len(card) == 1:
+                non_mdfcs.append(card[0])
             else:
-                r = requests.get(image)
+                # should NOT be any cards with more than 2 faces.
+                # if there is god is dead
+                assert(len(card) == 2)
+                mdfcs.append(card)
+        while mdfcs:
+            mdfc = mdfcs.popleft()
+            output_images.extend(mdfc)
+            if non_mdfcs:
+                output_images.append(non_mdfcs.popleft())
+            else:
+                output_images.append(None)
+        output_images.extend(non_mdfcs)
+    else:
+        output_images = list(itertools.chain.from_iterable(image_uris))
 
-                canvas.drawInlineImage(PilImage.open(BytesIO(r.content)), x, y, card_width, card_height)
 
-    for batch in itertools.batched(image_uris, 9):
+
+    for batch in itertools.batched(output_images, 9):
         draw_image_batch(canvas, batch)
         canvas.showPage()
     
         
         
+if failed:
+    print("Some downloads failed, so the PDF is incomplete.")
+    for f in failed:
+        print(f)
 
     
 
