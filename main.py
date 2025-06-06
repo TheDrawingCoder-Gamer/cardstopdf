@@ -24,15 +24,15 @@ parser.add_argument("--output", help="Output PDF", required=True)
 subparsers = parser.add_subparsers(dest="subparser")
 
 stitch_parser = subparsers.add_parser("stitch", help="Stitch Mode (from images, no duplicates)")
-stitch_parser.add_argument("--input", help="Input Directory", required=True)
+stitch_parser.add_argument(dest="input", help="Input Directory")
 
 deck_parser = subparsers.add_parser("deck", help="Deck Mode (from csv, download and cache from scryfall)")
-deck_parser.add_argument("--deck", "--input", help="Deck CSV (quantity, name, set code, collector number)", required=True)
+deck_parser.add_argument(dest="deck", help="Deck CSV (quantity, name, set code, collector number)")
 deck_parser.add_argument("--cache", dest="cache", default="cache", help="Override cache dir (default 'cache')")
 deck_parser.add_argument("--nocache", dest="cache", action="store_const", const=None, help="Disable caching")
 deck_parser.add_argument("--include-basic-lands", dest="basic_lands", action="store_true", help="By default, basic lands are excluded. Use this to include them.")
-deck_parser.add_argument("--unpair-dfc", dest="pair_dfc", action="store_false", help="By default, DFCs will be moved around so that they are side by side. Use this to disable that.")
-deck_parser.add_argument("--double-sided-mode", dest="double_sided", action="store_true", help="Place DFCs on the back of a page instead of side by side.")
+deck_parser.add_argument("--pair-dfc", dest="pair_dfc", action="store_true", help="Moves DFCs so that they are side by side and can be folded together.")
+deck_parser.add_argument("--double-sided-mode", dest="double_sided", action="store_true", help="Make actual DFCs with double sided pages.")
 
 
 args = parser.parse_args()
@@ -160,6 +160,10 @@ elif args.subparser == "deck":
             da_uris = True
             if len(row) > 4:
                 da_uris = [{"local_file": row[4] }]
+                if len(row) > 5:
+                    da_uris.append({"local_file": row[5]})
+                if len(row) > 6:
+                    print(f"More than 2 images specified for card {row[1]} ... ignoring")
             else:
                 if args.cache:
                     cache_res = cache_check(row[2], row[3], basic_lands=args.basic_lands)
@@ -198,16 +202,28 @@ elif args.subparser == "deck":
         canvas.showPage()
     
     output_images = []
+
+    is_double_sided = False
+
     if args.double_sided:
+        single_sided = []
         for group in itertools.batched(image_uris, 9):
             back_faces = [None] * 9
             front_faces = [None] * 9
             for idx, card in enumerate(group):
                 front_faces[idx] = card[0]
                 if len(card) == 2:
+                    is_double_sided = True
                     back_faces[idx] = card[1]
+
+            if not is_double_sided:
+                single_sided.extend(front_faces)
+
             output_images.extend(front_faces)
-            output_images.extend(back_faces) 
+            output_images.extend(back_faces)
+
+        if not is_double_sided:
+            output_images = single_sided
 
     elif args.pair_dfc:
         mdfcs = collections.deque()
@@ -233,7 +249,7 @@ elif args.subparser == "deck":
 
 
     batch_size = 9
-    if args.double_sided:
+    if is_double_sided:
         batch_size = 18
 
     for batch in itertools.batched(output_images, batch_size):
