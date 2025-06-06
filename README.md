@@ -27,7 +27,7 @@ There are two ways to use this: via a CSV document with your deck, or with a bun
 Just pass in the directory of the deck as the first argument to the stitch mode:
 
 ```
-python main.py stitch input_dir
+python main.py --output out.pdf stitch input_dir
 ```
 
 All images in the directory will be put on the page. It's assumed the images are in the correct aspect ratio, and stretching/clipping
@@ -38,7 +38,7 @@ may occur if it's not in the correct aspect ratio.
 Pass in a CSV like so:
 
 ```
-python main.py deck deck.csv
+python main.py --output out.pdf deck deck.csv
 ```
 
 The CSV must be in a specific format.
