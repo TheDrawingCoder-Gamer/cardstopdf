@@ -209,7 +209,7 @@ elif args.subparser == "deck":
             output_images.extend(front_faces)
             output_images.extend(back_faces) 
 
-    elif args.pair_mdfc:
+    elif args.pair_dfc:
         mdfcs = collections.deque()
         non_mdfcs = collections.deque()
         for card in image_uris:
