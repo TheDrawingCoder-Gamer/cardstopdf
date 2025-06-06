@@ -31,7 +31,9 @@ deck_parser.add_argument("--deck", "--input", help="Deck CSV (quantity, name, se
 deck_parser.add_argument("--cache", dest="cache", default="cache", help="Override cache dir (default 'cache')")
 deck_parser.add_argument("--nocache", dest="cache", action="store_const", const=None, help="Disable caching")
 deck_parser.add_argument("--include-basic-lands", dest="basic_lands", action="store_true", help="By default, basic lands are excluded. Use this to include them.")
-deck_parser.add_argument("--unpair-mdfc", dest="pair_mdfc", action="store_false", help="By default, MDFCs will be moved around so that they are side by side. Use this to disable that.")
+deck_parser.add_argument("--unpair-dfc", dest="pair_dfc", action="store_false", help="By default, DFCs will be moved around so that they are side by side. Use this to disable that.")
+deck_parser.add_argument("--double-sided-mode", dest="double_sided", action="store_true", help="Place DFCs on the back of a page instead of side by side.")
+
 
 args = parser.parse_args()
 
@@ -48,6 +50,7 @@ horz_bleed_edge = 0.3 * inch
 
 vert_bleed_edge = 0.15 * inch
 
+page_width, page_height = letter
 
 canvas = canvas.Canvas(args.output, pagesize=portrait(letter))
 
@@ -97,7 +100,7 @@ failed = []
 def uris_of_data(data):
     layout = data["layout"]
     if layout == "transform" or layout == "modal_dfc":
-        return [card_face["image_uris"]["png"] for card_face in data["card_faces"]] 
+        return [card_face["image_uris"]["png"] for card_face in data["card_faces"]]
     elif layout == "meld":
         failed.append(data["name"] + " - Back face (can't fetch meld backface due to api)")
 
@@ -167,7 +170,7 @@ elif args.subparser == "deck":
                 else:
                     da_uris = uris(row[1], row[2], row[3], basic_lands=args.basic_lands)
             for x in range(int(row[0])):
-                # append for MDFC
+                # append for DFC
                 image_uris.append(da_uris)
     
 
@@ -175,9 +178,14 @@ elif args.subparser == "deck":
     def draw_image_batch(canvas, images):
         
         for idx, image in enumerate(images):
+            # if we have extra slots, place them on the back (it's the back side)
+            if idx == 9:
+                canvas.showPage()
             if image:
-                y = vert_bleed_edge + math.floor(idx / 3) * (card_height + card_spacing)
+                y = vert_bleed_edge + math.floor((idx % 9) / 3) * (card_height + card_spacing)
                 x = horz_bleed_edge + (idx % 3) * (card_width + card_spacing)
+                if idx >= 9:
+                    x = page_width - horz_bleed_edge - ((idx % 3) + 1) * (card_width + card_spacing)
                
                 # I LOVE FREAK TYPING
                 if "local_file" in image:
@@ -187,9 +195,21 @@ elif args.subparser == "deck":
                     r = requests.get(image)
 
                     canvas.drawInlineImage(PilImage.open(BytesIO(r.content)), x, y, card_width, card_height)
+        canvas.showPage()
     
     output_images = []
-    if args.pair_mdfc:
+    if args.double_sided:
+        for group in itertools.batched(image_uris, 9):
+            back_faces = [None] * 9
+            front_faces = [None] * 9
+            for idx, card in enumerate(group):
+                front_faces[idx] = card[0]
+                if len(card) == 2:
+                    back_faces[idx] = card[1]
+            output_images.extend(front_faces)
+            output_images.extend(back_faces) 
+
+    elif args.pair_mdfc:
         mdfcs = collections.deque()
         non_mdfcs = collections.deque()
         for card in image_uris:
@@ -212,10 +232,12 @@ elif args.subparser == "deck":
         output_images = list(itertools.chain.from_iterable(image_uris))
 
 
+    batch_size = 9
+    if args.double_sided:
+        batch_size = 18
 
-    for batch in itertools.batched(output_images, 9):
+    for batch in itertools.batched(output_images, batch_size):
         draw_image_batch(canvas, batch)
-        canvas.showPage()
     
         
         
