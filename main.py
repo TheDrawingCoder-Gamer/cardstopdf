@@ -14,6 +14,8 @@ from pathvalidate import sanitize_filename
 from io import BytesIO
 import time
 import json
+import scryfall
+from tqdm import tqdm
 
 headers = {"user-agent": "TheDrawingCoder-Gamer/cardstopdf/0.0.2", "accept": "*/*" }
 
@@ -54,88 +56,12 @@ page_width, page_height = letter
 
 canvas = canvas.Canvas(args.output, pagesize=portrait(letter))
 
-def cache_check(set_code, collector_num, basic_lands=False):
-    if not args.cache:
-        return None
-
-    # should be all valid characters here
-    cache_file = os.path.join(args.cache, f"{set_code} {collector_num}.json")
-    if os.path.exists(cache_file):
-        with open(cache_file, "r") as txt:
-            data = json.load(txt)
-            if "basic_land" in data and data["basic_land"] and not basic_lands:
-                return []
-            else:
-                return [{ "local_file": os.path.join(args.cache, file)} for file in data["images"]]
-
-
-
-    return None
-
-def save_cache(set_code, collector_num, basic_lands=False):
-    infos = freaky_uris(set_code, collector_num)
-
-    images = []
-    for idx, uri in enumerate(infos["images"]):
-        r = requests.get(uri, headers=headers)
-        
-        image_file = f"{set_code} {collector_num} {idx}.png"
-        with open(os.path.join(args.cache, image_file), "wb") as bin:
-            bin.write(r.content)
-
-        images.append(image_file)
-
-    with open(os.path.join(args.cache, f"{set_code} {collector_num}.json"), "w") as txt:
-        json.dump({"basic_land": infos["basic_land"], "images": images}, txt)
-
-    if infos["basic_land"] and not basic_lands:
-        return []
-    else:
-        return [{"local_file": os.path.join(args.cache, image)} for image in images]
 
 def filename_of_card(name, set_code, collector_num):
     return sanitize_filename(f"{name} ({set_code} {collector_num})")
 
 failed = []
-def uris_of_data(data):
-    layout = data["layout"]
-    if layout == "transform" or layout == "modal_dfc":
-        return [card_face["image_uris"]["png"] for card_face in data["card_faces"]]
-    elif layout == "meld":
-        failed.append(data["name"] + " - Back face (can't fetch meld backface due to api)")
 
-        return [data["image_uris"]["png"]]
-    elif data["image_uris"] and data["image_uris"]["png"]:
-        return [data["image_uris"]["png"]]
-    else:
-        failed.append(data["name"] + " - no image found. This tool probably doesn't support this kind of card.")
-        return []
-
-def freaky_uris(set_code, collector_num):
-    da_url = f"https://api.scryfall.com/cards/{set_code}/{collector_num}"
-    r = requests.get(da_url, headers=headers)
-
-    time.sleep(0.1)
-
-    data = r.json()
-
-    return { "basic_land": ("Basic Land" in data["type_line"]), "images": uris_of_data(data) }
-
-def uris(name, set_code, collector_num, basic_lands=False):
-    da_url = f"https://api.scryfall.com/cards/{set_code}/{collector_num}"
-    r = requests.get(da_url, headers=headers)
-
-    # do this or else i get banned : (
-    time.sleep(0.1)
-    
-    data = r.json()
-
-    # TODO: this breaks with cache
-    if (not basic_lands) and "Basic Land" in data["type_line"]:
-        # empty so i dont crash : (
-        return []
-        
-    return uris_of_data(data)
 
 
 if args.subparser == "stitch":
@@ -157,7 +83,7 @@ elif args.subparser == "deck":
     with open(args.deck, "r") as deck:
         deck_csv = csv.reader(deck)
         for row in deck_csv:
-            da_uris = True
+            da_uris = None
             if len(row) > 4:
                 da_uris = [{"local_file": row[4] }]
                 if len(row) > 5:
@@ -165,21 +91,21 @@ elif args.subparser == "deck":
                 if len(row) > 6:
                     print(f"More than 2 images specified for card {row[1]} ... ignoring")
             else:
-                if args.cache:
-                    cache_res = cache_check(row[2], row[3], basic_lands=args.basic_lands)
-                    if cache_res:
-                        da_uris = cache_res
-                    else:
-                        da_uris = save_cache(row[2], row[3], basic_lands=args.basic_lands)
-                else:
-                    da_uris = uris(row[1], row[2], row[3], basic_lands=args.basic_lands)
-            for x in range(int(row[0])):
-                # append for DFC
-                image_uris.append(da_uris)
+                # Ignore name as it may be mispelled
+                da_card = scryfall.get_card(card_name=None, set_id=row[2], collector_number=row[3])
+                if da_card:
+                    if not args.basic_lands and "Basic Land" in da_card["type_line"]:
+                        continue
+                    da_faces = scryfall.get_faces(da_card)
+                    da_uris = [{"local_file": scryfall.get_image(face["image_uris"]["png"]) } for face in da_faces]
+            if da_uris:
+                for x in range(int(row[0])):
+                    # append for DFC
+                    image_uris.append(da_uris)
     
 
 
-    def draw_image_batch(canvas, images):
+    def draw_image_batch(canvas, images, pbar):
         
         for idx, image in enumerate(images):
             # if we have extra slots, place them on the back (it's the back side)
@@ -199,6 +125,7 @@ elif args.subparser == "deck":
                     r = requests.get(image)
 
                     canvas.drawInlineImage(PilImage.open(BytesIO(r.content)), x, y, card_width, card_height)
+            pbar.update(1)
         canvas.showPage()
     
     output_images = []
@@ -252,8 +179,9 @@ elif args.subparser == "deck":
     if is_double_sided:
         batch_size = 18
 
-    for batch in itertools.batched(output_images, batch_size):
-        draw_image_batch(canvas, batch)
+    with tqdm(total=len(output_images), desc="Generating PDF") as pbar:
+        for batch in itertools.batched(output_images, batch_size):
+            draw_image_batch(canvas, batch, pbar)
     
         
         
