@@ -22,6 +22,19 @@ I've complained to scryfall about it but they haven't updated their api : (.
 
 There are two ways to use this: via a CSV document with your deck, or with a bunch of image files.
 
+### Shared Options
+
+You can specify page size, card size, and spacing between cards:
+
+```
+python main.py --page-size letter --card-size 3.5x5in --card-spacing 0.1in
+```
+
+Page size can be named (a4, a3, a5, letter, legal) or specified like how card size is specified above.
+
+The unit at the end of sizes and lengths may be mm, cm, in, or pt. If it's omitted, it's assumed to be inches.
+
+
 ### Stitch mode
 
 Just pass in the directory of the deck as the first argument to the stitch mode:
@@ -69,14 +82,6 @@ You can't add anymore images to a card. If you would like to stitch together a b
 #### Deck options
 
 Deck mode has many options.
-
-`--cache CACHE`: changes the cache dir.
-
-By default, any images downloaded are cache in a directory named `cache`. You can change this directory.
-
-`--nocache`: disables cache.
-
-Not recommended if you want to use this more than once. Downloading is very slow and makes the scryfall servers sad.
 
 `--include-basic-lands`: includes basic lands
 

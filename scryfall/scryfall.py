@@ -10,6 +10,9 @@ from functools import cache as memoize
 
 import requests
 
+
+
+headers = {"user-agent": "TheDrawingCoder-Gamer/cardstopdf/0.0.2", "accept": "*/*" }
 cache = Path(gettempdir()) / "bublis_scryfall_cache"
 cache.mkdir(parents=True, exist_ok=True)
 scryfall_rate_limiter = RateLimiter(delay=0.1)
@@ -33,7 +36,7 @@ def get_file(file_name, url):
     return str(file_path)
 
 def download(url, dst, chunk_size = 1024 * 4):
-    with requests.get(url, stream=True) as req:
+    with requests.get(url, stream=True, headers=headers) as req:
         req.raise_for_status()
         with open(dst, "xb") as f:
             for chunk in req.iter_content(chunk_size=chunk_size):
@@ -42,7 +45,7 @@ def download(url, dst, chunk_size = 1024 * 4):
 
 def depaginate(url):
     with scryfall_rate_limiter:
-        response = requests.get(url).json()
+        response = requests.get(url, headers=headers).json()
     assert response["object"]
     if "data" not in response:
         return []
