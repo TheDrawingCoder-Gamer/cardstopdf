@@ -48,15 +48,32 @@ may occur if it's not in the correct aspect ratio.
 
 ### Deck mode
 
-Pass in a CSV like so:
+
+You can pass in decklist, like so:
 
 ```
-python main.py --output out.pdf deck deck.csv
+python main.py --output out.pdf deck deck.txt
 ```
 
-The CSV must be in a specific format.
 
-Off archidekt, you can export as CSV and check "Edition Code" and "Collector Number" under the enabled columns (in that order, archidekt is weird with ordering.)
+There are multiple valid formats for the decklist.
+
+Exporting from Archidekt as Arena is the easiest format and doesn't require any editing.
+
+You can also export an CSV. You have to check "Edition Code" and "Collector Number" in that order on Archidekt.
+
+You can add custom cards as well. In the Arena format, this line will add a custom card:
+
+```
+cstm: 1 Card Name [front_face.png]
+```
+
+You can add a back face as well:
+
+```
+cstm: 1 Card Name [front_face.png] [back_face.png]
+```
+
 
 You may modify the CSV as well to include custom images; Here's a sample line from a CSV.
 
@@ -78,6 +95,8 @@ For Double faced cards, you can add another reference to a file:
 ```
 
 You can't add anymore images to a card. If you would like to stitch together a bunch of card images, try the stitch mode.
+
+Archidekt and Moxfield URLs are also accepted.
 
 #### Deck options
 

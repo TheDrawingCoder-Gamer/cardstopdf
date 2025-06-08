@@ -7,3 +7,4 @@ cache
 *.jpeg
 *.jpg
 __pycache__
+samples

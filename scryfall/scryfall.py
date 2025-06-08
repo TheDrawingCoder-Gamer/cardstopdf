@@ -7,6 +7,7 @@ import threading
 import pickle
 import json
 from functools import cache as memoize
+from collections import defaultdict
 
 import requests
 
@@ -108,3 +109,19 @@ def get_faces(card):
         return card["card_faces"]
     else:
         raise ValueError(f"Unknown layout {card['layout']}")
+
+@memoize
+def card_by_id():
+    return {c["id"]: c for c in get_cards()}
+
+@memoize
+def cards_by_oracle_id():
+    cards_by_oracle_id = defaultdict(list)
+    for c in get_cards():
+        if "oracle_id" in c:
+            cards_by_oracle_id[c["oracle_id"]].append(c)
+        elif "card_faces" in c and "oracle_id" in c["card_faces"][0]:
+            cards_by_oracle_id[c["card_faces"][0]["oracle_id"]].append(c)
+    return cards_by_oracle_id
+
+

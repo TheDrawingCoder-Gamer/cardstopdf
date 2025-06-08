@@ -11,7 +11,11 @@ import scryfall
 from tqdm import tqdm
 from proxygen.print_cards import print_cards, page_sizes, units, inch
 import more_itertools
+import itertools
 import numpy as np
+from proxygen.decklists import CustomCard, Card, parse_any
+from proxygen.decklists.archidekt import parse_decklist as download_archidekt
+from proxygen.decklists.moxfield import parse_decklist as download_moxfield
 
 
 
@@ -26,8 +30,8 @@ subparsers = parser.add_subparsers(dest="subparser")
 stitch_parser = subparsers.add_parser("stitch", help="Stitch Mode (from images, no duplicates)")
 stitch_parser.add_argument(dest="input", help="Input Directory")
 
-deck_parser = subparsers.add_parser("deck", help="Deck Mode (from csv, download and cache from scryfall)")
-deck_parser.add_argument(dest="deck", help="Deck CSV (quantity, name, set code, collector number)")
+deck_parser = subparsers.add_parser("deck", help="Deck Mode (from file or URL, download and cache from scryfall)")
+deck_parser.add_argument(dest="deck", help="Deck file or archidekt URL")
 deck_parser.add_argument("--include-basic-lands", dest="basic_lands", action="store_true", help="By default, basic lands are excluded. Use this to include them.")
 deck_parser.add_argument("--pair-dfc", dest="pair_dfc", action="store_true", help="Moves DFCs so that they are side by side and can be folded together.")
 deck_parser.add_argument("--double-sided-mode", dest="double_sided", action="store_true", help="Make actual DFCs with double sided pages.")
@@ -77,34 +81,33 @@ failed = []
 mode = "normal"
 images = []
 
+
 if args.subparser == "stitch":
     images = [[file] for file in os.listdir(args.input)]
 elif args.subparser == "deck":
-    with open(args.deck, "r") as deck:
-        deck_csv = csv.reader(deck)
-        rows = [row for row in deck_csv]
-        for row in tqdm(rows, desc="Fetching card images"):
-            da_uris = None
-            if len(row) > 4:
-                da_uris = [row[4]]
-                if len(row) > 5:
-                    da_uris.append(row[5])
-                if len(row) > 6:
-                    print(f"More than 2 images specified for card {row[1]} ... ignoring")
-            else:
-                # Ignore name as it may be mispelled
-                da_card = scryfall.get_card(card_name=None, set_id=row[2], collector_number=row[3])
-                if da_card:
-                    if not args.basic_lands and "Basic Land" in da_card["type_line"]:
-                        continue
-                    da_faces = scryfall.get_faces(da_card)
-                    da_uris = [scryfall.get_image(face["image_uris"]["png"]) for face in da_faces]
-            if da_uris:
-                for x in range(int(row[0])):
-                    # append for DFC
-                    images.append(da_uris)
-    
+    if args.deck.startswith("https://"):
+        if args.deck.startswith("https://archidekt.com/decks/"):
+            archidekt_id = args.deck[8:].split("/")[2]
+            # heh.......
+            print("Downloading archidekt deck, this may take a while...")
+            decklist = download_archidekt(archidekt_id)
+        elif args.deck.startswith("https://moxfield.com/decks/"):
+            moxfield_id = args.deck.split("/")[-1]
+            print("Downloading moxfield deck, this may take a while...")
+            decklist = download_moxfield(moxfield_id)
+    else:
+        decklist = parse_any(args.deck)
 
+    for card in tqdm(decklist.cards, desc="Fetching card images"):
+        if isinstance(card, CustomCard):
+            da_uris = [card.front_face]
+            if card.back_face:
+                da_uris.append(card.back_face)
+        else:
+            if not args.basic_lands and "Basic Land" in card["type_line"]:
+                continue
+            da_uris = [scryfall.get_image(uris["png"]) for uris in card.image_uris]
+        images.append(da_uris) 
 
     mode = "normal"
     if args.double_sided:

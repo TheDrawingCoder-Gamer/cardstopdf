@@ -3,7 +3,10 @@ from scryfall.scryfall import (
         get_card,
         get_cards,
         get_faces,
-        get_image
+        get_image,
+        headers,
+        card_by_id,
+        cards_by_oracle_id
         )
 
 
@@ -12,5 +15,8 @@ __all__ = [
         "get_card",
         "get_cards",
         "get_faces",
-        "get_image"
+        "get_image",
+        "headers",
+        "card_by_id",
+        "cards_by_oracle_id"
         ]
