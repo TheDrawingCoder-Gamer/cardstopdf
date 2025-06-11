@@ -3,3 +3,4 @@ tqdm
 fpdf
 numpy
 more-itertools
+parsec

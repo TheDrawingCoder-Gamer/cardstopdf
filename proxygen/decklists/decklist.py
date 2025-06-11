@@ -7,6 +7,8 @@ import more_itertools
 import itertools
 import csv
 import scryfall
+import parsec
+from proxygen.util import list_to_str, compose
 
 @dataclass
 class CardLike:
@@ -92,40 +94,54 @@ class Decklist:
     def total_count_unique(self) -> int:
         return len(self.cards)
 
+
+
+face_parsec = parsec.between(parsec.string("["), parsec.string("]"), parsec.many1(parsec.none_of("]"))).parsecmap(list_to_str)
+
+
+@parsec.generate
+def cstm_line_parsec():
+    yield parsec.string("cstm:")
+    yield parsec.spaces()
+    count = yield parsec.natural
+    yield parsec.spaces()
+    name = yield parsec.many1(parsec.none_of("["))
+    front_face = yield face_parsec
+    yield parsec.spaces()
+    back_face = yield parsec.optional(face_parsec)
+    return (True, count, list_to_str(name).strip(), list_to_str(front_face), list_to_str(back_face) if back_face else None)
+
+
+@parsec.generate
+def plain_line_parsec():
+    count = yield parsec.natural
+    yield parsec.optional(parsec.string("x"))
+    yield parsec.spaces()
+    name = yield parsec.many1(parsec.none_of("("))
+    set_code = yield parsec.between(parsec.string("("), parsec.string(")"), parsec.many1(parsec.none_of(")")))
+    yield parsec.spaces()
+    collector_number = yield parsec.many1(parsec.any())
+    return (False, count, list_to_str(name).strip(), list_to_str(set_code), list_to_str(collector_number).strip())
+
+
+line_parsec = cstm_line_parsec.choice(plain_line_parsec) 
 # TODO: implement actual look ups
 def parse_decklist_stream(stream) -> Decklist:
     decklist = Decklist()
 
     for line in stream:
-        if line.startswith("cstm:"):
-            a = line[5:].strip()
-            count, rest = more_itertools.before_and_after(str.isnumeric, iter(a))
-            count = int(''.join(count))
-            next(rest)
-            name, rest = more_itertools.before_and_after(lambda x: x != '[', rest)
-            name = ''.join(name).strip()
-            next(rest)
-            front_face, rest = more_itertools.before_and_after(lambda x: x != ']', rest)
-            front_face = ''.join(front_face)
-            next(rest)
-            b = ''.join(rest).strip()
-            back_face = None
-            if b.startswith('['):
-                back_face = itertools.takewhile(lambda x: x != ']', iter(b[1:]))
-                back_face = ''.join(back_face)
-            decklist.append_custom_card(count, name, Path(front_face), Path(back_face) if back_face else None)
-        else:
-            m = re.search(r"([0-9]+)\s+(.+?)(?:\s+\((\S*)\)\s+(\S+))\s*$", line)
-            if m:
-                count = int(m.group(1))
-                card_name = m.group(2)
-                set_id = m.group(3)
-                collector_number = m.group(4)
-
-                card = scryfall.get_card(card_name=None, set_id=set_id, collector_number=collector_number)
-                decklist.append_card(count, card)
+        try:
+            cstm, count, name, data1, data2 = parsec.parse(line_parsec, line)
+            if cstm:
+                front_face, back_face = (data1, data2)
+                decklist.append_custom_card(count, name, Path(front_face), Path(back_face) if back_face else None)
             else:
-                decklist.append_comment(line.rstrip())
+                set_code, collector_number = (data1, data2)
+                print(set_code, collector_number)
+                card = scryfall.get_card(card_name=None, set_id=set_code, collector_number=collector_number)
+                decklist.append_card(count, card)
+        except parsec.ParseError:
+            decklist.append_comment(line.rstrip())
 
     return decklist
 
