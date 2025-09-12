@@ -30,15 +30,92 @@ units = {
         "mm": mm
         }
 
+def draw_bleed(pdf, data):
+    cardsize = data["cardsize"]
+    bleed = data["bleed"]
+    papersize = data["papersize"]
+    N = data["N"]
+    offset = data["offset"]
+    row_points = []
+    col_points = []
+    pdf.set_line_width(0.3 * mm)
+    for x in range(0, N[0] + 1):
+        x2 = offset[0] + _occupied_space(cardsize[0], x, 0)[0]
+        if x == 0 or x != N[0]:
+            col_points.append(x2 + bleed)
+        if x == N[0] or x != 0:
+            col_points.append(x2 - bleed)
+    for y in range(0, N[1] + 1):
+        y2 = offset[1] + _occupied_space(cardsize[1], y, 0)[1]
+        if y == 0 or y != N[1]:
+            row_points.append(y2 + bleed)
+        if y == N[1] or y != 0:
+            row_points.append(y2 - bleed)
+    pdf.set_draw_color(128, 128, 128)
+    for r in row_points:
+        for c in col_points:
+            pdf.line(c - bleed, r, c + bleed, r)
+            pdf.line(c, r - bleed, c, r + bleed)
+    pdf.set_draw_color(0, 0, 0)
+    for col in col_points:
+        pdf.line(x1=col, y1=0, x2=col, y2=offset[1])
+        pdf.line(col, papersize[1] - offset[1], col, papersize[1])
+    for row in row_points:
+        pdf.line(0, row, offset[0], row)
+        pdf.line(papersize[0] - offset[0], row, papersize[0], row)
+
+def draw_pdf(filepath, desc, images, draw_mode, data):
+    cardsize = data["cardsize"]
+    bleed = data["bleed"]
+    papersize = data["papersize"]
+    N = data["N"]
+    offset = data["offset"]
+    card_spacing = data["card_spacing"]
+    
+    cards_per_sheet = np.prod(N)
+
+    pdf = FPDF(orientation="P", unit="pt", format=papersize)
+
+    for i, image in enumerate(tqdm(images, desc=desc)):
+        if i % cards_per_sheet == 0:
+            
+            if i != 0 and bleed > 0:
+                draw_bleed(pdf, data)
+            pdf.add_page()
+
+        if image:
+            x = (i % cards_per_sheet) % N[0]
+            y = (i % cards_per_sheet) // N[0]
+   
+            if draw_mode == "back" or (draw_mode == "double" and (i % (cards_per_sheet * 2)) >= cards_per_sheet):
+                x = N[0] - (x + 1)
+        
+            lower = offset + _occupied_space(cardsize, np.array([x, y]), card_spacing)
+
+            pdf.set_fill_color(0, 0, 0)
+            # draw black under the image so that bleed edge will make sense for MOST:tm: cards
+            pdf.rect(x=lower[0], y=lower[1], w=cardsize[0], h=cardsize[1], style="F")
+            pdf.image(str(image), x=lower[0], y=lower[1], w=cardsize[0], h=cardsize[1])
+                
+    if bleed > 0:
+        draw_bleed(pdf, data)
+    
+    tqdm.write(f"Writing to {filepath}")
+    pdf.output(filepath)
+
 def print_cards(
             images: list[list[str | Path]],
             filepath: str | Path,
             papersize = np.array([612, 792]),
             cardsize= np.array([2.5 * inch, 3.5 * inch]),
             card_spacing = 0.1 * inch,
-            dfc_mode: str = "normal" # normal, paired, double_sided
+            dfc_mode: str = "normal", # normal, paired, double_sided, split_sides
+            bleed: float = 0,
+            back_output: str | Path | None = None,
             ) -> None:
 
+    if bleed > 0:
+        card_spacing = 0
 
     N = np.floor(papersize / (cardsize + card_spacing)).astype(int)
     if N[0] == 0 or N[1] == 0:
@@ -53,10 +130,49 @@ def print_cards(
 
     is_double_sided = False
     output_images = []
+    back_images = []
 
+    shared_data = {
+        "papersize": papersize,
+        "offset": offset,
+        "cardsize": cardsize,
+        "bleed": bleed,
+        "N": N,
+        "card_spacing": card_spacing
+    }
 
+    if dfc_mode == "split_sides":
+        dfcs = collections.deque()
+        non_dfcs = collections.deque()
+        for card in images:
+            if len(card) == 1:
+                non_dfcs.append(card)
+            else:
+                assert(len(card) == 2) 
+                dfcs.append(card)
+        frky_images = []
+        frky_images.extend(dfcs)
+        frky_images.extend(non_dfcs)
 
-    if dfc_mode == "double_sided":
+        has_done_all_dfc = False
+        for group in itertools.batched(frky_images, cards_per_sheet):
+            has_dfc = False
+            back_faces = [None] * cards_per_sheet
+            front_faces = [None] * cards_per_sheet
+            for idx, card in enumerate(group):
+                front_faces[idx] = card[0]
+                if len(card) == 2:
+                    assert(not has_done_all_dfc)
+                    has_dfc = True
+                    back_faces[idx] = card[1]
+            
+            if not has_dfc:
+                has_done_all_dfc = True
+            
+            output_images.extend(front_faces)
+            if not has_done_all_dfc:
+                back_images.extend(back_faces)
+    elif dfc_mode == "double_sided":
         single_sided = []
         dfcs = collections.deque()
         non_dfcs = collections.deque()
@@ -106,26 +222,15 @@ def print_cards(
     else:
         output_images = list(itertools.chain.from_iterable(images))
 
+    if dfc_mode == "double_sided":
+        draw_mode = "double"
+    else:
+        draw_mode = "normal"
+    draw_pdf(filepath, "Plotting cards", output_images, draw_mode, shared_data)
     
-            
-    pdf = FPDF(orientation="P", unit="pt", format=papersize)
 
-    for i, image in enumerate(tqdm(output_images, desc="Plotting cards")):
-        if i % cards_per_sheet == 0:
-            pdf.add_page()
+
+    if len(back_images) > 0:
+        draw_pdf(back_output, "Plotting back faces", back_images, "back", shared_data)
         
-        if image:
-            x = (i % cards_per_sheet) % N[0]
-            y = (i % cards_per_sheet) // N[0]
-   
-            if is_double_sided and (i % (cards_per_sheet * 2)) >= cards_per_sheet:
-                x = N[0] - (x + 1)
-        
-            lower = offset + _occupied_space(cardsize, np.array([x, y]), card_spacing)
 
-            pdf.image(str(image), x=lower[0], y=lower[1], w=cardsize[0], h=cardsize[1])
-
-
-    
-    tqdm.write(f"Writing to {filepath}")
-    pdf.output(filepath)
