@@ -8,6 +8,7 @@ import pickle
 import json
 from functools import cache as memoize
 from collections import defaultdict
+import os
 
 import requests
 
@@ -23,6 +24,9 @@ def get_image(image_uri):
     split = image_uri.split("/")
     file_name = split[-5] + "_" + split[-4] + "_" + split[-1].split("?")[0]
     return get_file(file_name, image_uri)
+
+def get_result_path(file_name):
+    return cache / file_name
 
 def get_file(file_name, url):
     file_path = cache / file_name
@@ -63,18 +67,20 @@ def _get_database(database_name="default_cards"):
     if len(bulk_data) != 1:
         raise ValueError(f"Unknown database {database_name}")
 
-    bulk_file = Path(get_file(bulk_data[0]["download_uri"].split("/")[-1], bulk_data[0]["download_uri"]))
-    pickle_file = bulk_file.with_suffix(".pickle")
-    if not pickle_file.is_file():
+    file_name = bulk_data[0]["download_uri"].split("/")[-1]
+    bulk_path = get_result_path(file_name)
+    pickle_path = bulk_path.with_suffix(".pickle")
+    if pickle_path.is_file():
+        with open(pickle_path, "rb") as f:
+            return pickle.load(f)
+    else:
+        print("Database is missing or out of date, fetching (this may take a while...)")
+        bulk_file = Path(get_file(file_name, bulk_data[0]["download_uri"]))
         with open(bulk_file, encoding="utf-8") as json_file:
             data = json.load(json_file)
         with open(pickle_file, "wb") as pickle_file:
             pickle.dump(data, pickle_file, protocol=pickle.HIGHEST_PROTOCOL)
         return data
-    else:
-        with open(pickle_file, "rb") as f:
-            return pickle.load(f)
-
 def canonic_card_name(name):
     name = name.lower()
 

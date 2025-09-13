@@ -7,6 +7,7 @@ from pathlib import Path
 from tqdm import tqdm
 from PIL import Image, ImageDraw
 import os
+import tempfile
 
 # sus...
 
@@ -15,8 +16,8 @@ image_width = 745
 # changes after every print_pdf call
 image_size = np.array([745, 1040])
 
-def _occupied_space(cardsize, pos, card_spacing: float, closed: bool = False):
-    return cardsize * (pos * image_size + np.clip(2 * pos, 0, None) * card_spacing) / image_size
+def _occupied_space(container_size, pos, closed: bool = False):
+    return container_size * pos
 
 page_sizes = {
         "a3": (841.89, 1190.55),
@@ -31,6 +32,8 @@ dpi = 300
 inch = 72
 cm = inch / 2.54
 mm = cm * 0.1
+# i did the thing i learned in science class, ts should NOT crash
+px = inch / dpi
 
 units = {
         "pt": 1,
@@ -61,6 +64,16 @@ class PDFDrawable:
     def image(self, path, x, y, w, h):
         self.pdf.image(path, x, y, w, h)
 
+    def inmem_image(self, im, x, y, w, h):
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as f:
+            tmp = f.name
+        
+        im.save(tmp)
+        # loaded into memory
+        # this is probably really bad if you have 10 mountains
+        self.pdf.image(tmp, x, y, w, h)
+        os.unlink(tmp)
+
     def add_page(self):
         self.pdf.add_page()
 
@@ -89,11 +102,17 @@ class PILDrawable:
     def filled_rect(self, x, y, w, h, color):
         self.draw.rectangle([pt_to_px(x), pt_to_px(y), pt_to_px(x + w), pt_to_px(y + h)], fill=color)
     
+    # for testing only, no need to mirror to PDF for now
+    def rect(self, x, y, w, h, color):
+        self.draw.rectangle([pt_to_px(x), pt_to_px(y), pt_to_px(x + w), pt_to_px(y + h)], outline=color, width=pt_to_px(line_width))
+    
     def image(self, path, x, y, w, h):
         if os.path.exists(path):
             with Image.open(path) as im:
-                im_resized = im.resize((pt_to_px(w), pt_to_px(h)))
-                self.img.paste(im_resized, box=(pt_to_px(x), pt_to_px(y)))
+                self.inmem_image(im, x, y, w, h)
+    def inmem_image(self, im, x, y, w, h):
+        im_resized = im.resize((pt_to_px(w), pt_to_px(h)))
+        self.img.paste(im_resized, box=(pt_to_px(x), pt_to_px(y)))
     
     def save(self):
         if self.img:
@@ -131,50 +150,59 @@ def draw_guide(pdf, data):
     N = data["N"]
     offset = data["offset"]
     card_spacing = data["card_spacing"]
+    guide_mode = data["guide_mode"]
+    container_size = data["container_size"]
+    
 
     row_points = []
     col_points = []
-    for x in range(0, N[0] + 1):
-        x2 = offset[0] + _occupied_space(cardsize, x, card_spacing)[0]
-        if bleed > 0:
-            if x == 0 or x != N[0]:
-                col_points.append(x2 + bleed)
-            if x == N[0] or x != 0:
-                col_points.append(x2 - bleed)
-        else:
-            if x == N[0]:
-                col_points.append(x2 - card_spacing / 2)
-            elif x == 0:
-                col_points.append(x2)
-            else:
-                col_points.append(x2 - card_spacing / 4)
-    for y in range(0, N[1] + 1):
-        y2 = offset[1] + _occupied_space(cardsize, y, card_spacing)[1]
 
-        if bleed > 0:
-            if y == 0 or y != N[1]:
-                row_points.append(y2 + bleed)
-            if y == N[1] or y != 0:
-                row_points.append(y2 - bleed)
+    if bleed > 0:
+        move_by = bleed
+    else:
+        move_by = card_spacing / 2
+    for x in range(0, N[0] + 1):
+        x2 = offset[0] + _occupied_space(container_size, x)[0]
+        if guide_mode == "edge" and move_by != 0:
+            if x == 0 or x != N[0]:
+                col_points.append(x2 + move_by)
+            if x == N[0] or x != 0:
+                col_points.append(x2 - move_by)
         else:
-            if y == N[1]:
-                row_points.append(y2 - card_spacing / 2)
-            elif y == 0:
-                row_points.append(y2)
+            if x == 0:
+                col_points.append(x2 + move_by)
+            elif x == N[0]:
+                col_points.append(x2 - move_by)
             else:
-                # half is space between two cards (because fuck you, thats why), so we take half that
-                row_points.append(y2 - card_spacing / 4)
+                col_points.append(x2)
+    for y in range(0, N[1] + 1):
+        y2 = offset[1] + _occupied_space(container_size, y)[1]
+
+        if guide_mode == "edge" and move_by != 0:
+            if y == 0 or y != N[1]:
+                row_points.append(y2 + move_by)
+            if y == N[1] or y != 0:
+                row_points.append(y2 - move_by)
+        else:
+            if y == 0:
+                row_points.append(y2 + move_by)
+            elif y == N[1]:
+                row_points.append(y2 - move_by)
+            else:
+                row_points.append(y2)
     cross_size = 0.5 * mm
+    # offset to be flush with the edge of the cards
+    flush_offset = offset + card_spacing / 2
     for r in row_points:
         for c in col_points:
             pdf.line(c - cross_size, r, c + cross_size, r, color=gray)
             pdf.line(c, r - cross_size, c, r + cross_size, color=gray)
     for col in col_points:
-        pdf.line(x1=col, y1=0, x2=col, y2=offset[1], color=black)
-        pdf.line(col, papersize[1] - offset[1], col, papersize[1], color=black)
+        pdf.line(x1=col, y1=0, x2=col, y2=flush_offset[1], color=black)
+        pdf.line(col, papersize[1] - flush_offset[1], col, papersize[1], color=black)
     for row in row_points:
-        pdf.line(0, row, offset[0], row, color=black)
-        pdf.line(papersize[0] - offset[0], row, papersize[0], row, color=black)
+        pdf.line(0, row, flush_offset[0], row, color=black)
+        pdf.line(papersize[0] - flush_offset[0], row, papersize[0], row, color=black)
         
 
 def draw_pdf(filepath, desc, images, draw_mode, data):
@@ -185,10 +213,17 @@ def draw_pdf(filepath, desc, images, draw_mode, data):
     offset = data["offset"]
     card_spacing = data["card_spacing"]
     guide = data["guide"]
+    container_size = data["container_size"]
+    card_zoom = data["card_zoom"]
     
     cards_per_sheet = np.prod(N)
 
     pdf = get_drawable(papersize, filepath)
+
+    if card_spacing > 0:
+        center_by = (container_size - cardsize) / 2
+    else:
+        center_by = 0
 
     for i, image in enumerate(tqdm(images, desc=desc)):
         if i % cards_per_sheet == 0:
@@ -204,11 +239,20 @@ def draw_pdf(filepath, desc, images, draw_mode, data):
             if draw_mode == "back" or (draw_mode == "double" and (i % (cards_per_sheet * 2)) >= cards_per_sheet):
                 x = N[0] - (x + 1)
         
-            lower = offset + _occupied_space(cardsize, np.array([x, y]), card_spacing)
-
-            # draw black under the image so that bleed edge will make sense for MOST:tm: cards
-            pdf.filled_rect(x=lower[0], y=lower[1], w=cardsize[0], h=cardsize[1], color=black)
-            pdf.image(str(image), x=lower[0], y=lower[1], w=cardsize[0], h=cardsize[1])
+            full_lower = offset + _occupied_space(container_size, np.array([x, y]))
+            lower = full_lower + center_by
+            
+            # pdf.filled_rect(x=lower[0], y=lower[1], w=cardsize[0], h=cardsize[1], color=black)
+            if card_zoom > 0:
+                with Image.open(image) as im:
+                    im_resized = im.resize((pt_to_px(cardsize[0] + card_zoom), pt_to_px(cardsize[1] + card_zoom)))
+                    zoom_px = pt_to_px(card_zoom)
+                    crop_by = np.rint((np.array(im_resized.size) - pt_to_px(container_size)) / 2).astype(int)
+                    cropped = im_resized.crop((crop_by[0], crop_by[1], im_resized.width - crop_by[0], im_resized.height - crop_by[1]))
+                    pdf.inmem_image(cropped, lower[0], lower[1], container_size[0], container_size[1])
+            else:
+                pdf.image(str(image), x=lower[0], y=lower[1], w=cardsize[0], h=cardsize[1])
+                # pdf.rect(full_lower[0], full_lower[1], container_size[0], container_size[1], black)
                 
     if guide:
         draw_guide(pdf, data)
@@ -229,17 +273,21 @@ def print_cards(
             ) -> None:
 
     if bleed > 0:
+        container_size = cardsize + bleed * 2 + 1 * px
         card_spacing = 0
+        card_zoom = 6.2 * mm
+    else:
+        container_size = cardsize + card_spacing
+        card_zoom = 0
 
-    N = np.floor(papersize / (cardsize + card_spacing)).astype(int)
+    N = np.floor(papersize / container_size).astype(int)
     if N[0] == 0 or N[1] == 0:
         raise ValueError(f"Paper size too small: {papersize}")
 
     cards_per_sheet = np.prod(N)
     # preserve aspect ratio
     image_size = (cardsize / cardsize.sum()) * image_width
-    offset = ((papersize - _occupied_space(cardsize, N, card_spacing, closed=True)) / 2) + card_spacing / 4
-
+    offset = ((papersize - _occupied_space(container_size, N)) / 2)
 
     filepath = Path(filepath)
     filepath.parent.mkdir(parents=True, exist_ok=True)
@@ -256,6 +304,9 @@ def print_cards(
         "N": N,
         "card_spacing": card_spacing,
         "guide": show_guide,
+        "container_size": container_size,
+        "card_zoom": card_zoom,
+        "guide_mode": "edge", # center, edge
     }
 
     if dfc_mode == "split_sides":

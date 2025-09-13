@@ -36,7 +36,8 @@ Page size can be named (a4, a3, a5, letter, legal) or specified like how card si
 
 The unit at the end of sizes and lengths may be mm, cm, in, or pt. If it's omitted, it's assumed to be inches.
 
-Instead of card spacing, you can select the bleed edge size. 
+Instead of card spacing, you can select the bleed edge size. This will cut into the image, so for card art not specifically designed for
+bleed edge (any card art uploaded to MPC Autofill has bleed edge) will come out smaller than it's supposed to.
 
 ```
 python main.py --bleed-edge 1mm
