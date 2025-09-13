@@ -4,3 +4,4 @@ fpdf
 numpy
 more-itertools
 parsec
+pillow

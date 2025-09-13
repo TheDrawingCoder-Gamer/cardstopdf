@@ -1,9 +1,11 @@
 # Cards to PDF
 
-converts cards to pdf
+converts cards to pdf/image files
 
 because of how bad of a format pdf is i found that a single page takes ~20s. This means a full commander deck with all unique cards would take
 4 minutes to generate. Have fun with that!
+
+you can also output PNGs - it takes ~3s per page (mostly taken saving the page) so a full commander deck with all unique cards would take half a minute.
 
 ## Support
 
@@ -34,16 +36,45 @@ Page size can be named (a4, a3, a5, letter, legal) or specified like how card si
 
 The unit at the end of sizes and lengths may be mm, cm, in, or pt. If it's omitted, it's assumed to be inches.
 
+Instead of card spacing, you can select the bleed edge size. 
+
+```
+python main.py --bleed-edge 1mm
+```
+
+Specifying bleed edge will disable card spacing.
+
+You can also draw guide lines with `--guide`:
+
+```
+python main.py --guide
+```
+
+Specifying the PDF output is just passing an output with the PDF extension:
+```
+python main.py --output out.pdf
+```
+
+Image formats are more complicated; you'll need to provide a valid format string for numbers.
+This uses python's old style formatting (so it's similar to C and ffmpeg's options), seen [here](https://docs.python.org/3/library/stdtypes.html#old-string-formatting).
+
+The most basic case is a padded number:
+```
+python main.py --output page%03d.png
+```
+
+This will output page001.png, page002.png ... page999.png
+
+The `--back-output` option will be formatted the same way.
 
 ### Stitch mode
 
-Just pass in the directory of the deck as the first argument to the stitch mode:
-
+Pass in all files you want to stitch together to stitch mode:
 ```
-python main.py --output out.pdf stitch input_dir
+python main.py --output out.pdf stitch file1.png file2.png file3.png
 ```
 
-All images in the directory will be put on the page. It's assumed the images are in the correct aspect ratio, and stretching/clipping
+All inputs will be put on the page. It's assumed the images are in the correct aspect ratio, and stretching/clipping
 may occur if it's not in the correct aspect ratio.
 
 ### Deck mode
@@ -113,7 +144,13 @@ this will place all DFCs at the start and side by side so they can be folded tog
 
 `--double-sided-mode`: Generates a fully double sided PDF (if there are any DFCs)
 
-The faces may be slightly misaligned, but its within the black card border so its not too bad. Definitely worth using if you have special paper that won't be
-destroyed from that much ink!
+The faces may be slightly misaligned, but its within the black card border so its not too bad. 
+Definitely worth using if you have special paper that won't be destroyed from that much ink!
+These are almost perfectly aligned when using bleed edges, so prefer those if you are able to cut them correctly.
 
+`--back-output`: Generates a second PDF with back faces of DFC cards
+
+This is the same as double sided mode but it outputs every other page in a seperate PDF, which you control the filename of with this option.
+You can print all the front faces, then wait for the paper to dry and print all the back faces. This means you can print true DFCs even with
+a single sided printer.
 

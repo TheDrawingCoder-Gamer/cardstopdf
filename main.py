@@ -51,26 +51,29 @@ def parse_length(size):
 
     return x * units[unit]
 
-parser = argparse.ArgumentParser(prog="Cards To PDF")
-parser.add_argument("--output", help="Output PDF", required=True)
+parser = argparse.ArgumentParser(prog="Cards To Print")
+parser.add_argument("--output", help="Output File. Inferred to be PDF or PNG based on extension", required=True)
 parser.add_argument("--page-size", help="Page size (may be a descriptor or NxNunit. unit may be in/cm/mm/pt)")
 parser.add_argument("--card-size", help="Card size")
 parser.add_argument("--card-spacing", help="Card spacing. May be Nunit. Unit may be in/cm/mm/pt")
-parser.add_argument("--bleed-edge", help="Use bleed edge. Set to Nunit. Unit may be in/cm/mm/pt")
+parser.add_argument("--bleed-edge", "--bleed", help="Use bleed edge. Set to Nunit. Unit may be in/cm/mm/pt")
+parser.add_argument("--guide", help="Draw guide lines for cutting with a rotary trimmer or guillotine paper cutter.", action="store_true")
 
 subparsers = parser.add_subparsers(dest="subparser")
 
 stitch_parser = subparsers.add_parser("stitch", help="Stitch Mode (from images, no duplicates)")
-stitch_parser.add_argument(dest="input", help="Input Directory")
+stitch_parser.add_argument(dest="input", nargs='+', help="Input Files")
 
 deck_parser = subparsers.add_parser("deck", help="Deck Mode (from file or URL, download and cache from scryfall)")
 deck_parser.add_argument(dest="deck", help="Deck file or archidekt URL")
 deck_parser.add_argument("--include-basic-lands", dest="basic_lands", action="store_true", help="By default, basic lands are excluded. Use this to include them.")
 deck_parser.add_argument("--pair-dfc", dest="pair_dfc", action="store_true", help="Moves DFCs so that they are side by side and can be folded together.")
 deck_parser.add_argument("--double-sided-mode", dest="double_sided", action="store_true", help="Make actual DFCs with double sided pages.")
-deck_parser.add_argument("--back-output", dest="back_output", help="Split double sided face backs to a second PDF so that you can print double sided on a single sided printer.")
+deck_parser.add_argument("--back-output", dest="back_output", default=None, help="Split double sided face backs to a second file so that you can print double sided on a single sided printer.")
 
 args = parser.parse_args()
+
+back_output = None
 
 if args.page_size:
     if args.page_size.lower() in page_sizes:
@@ -107,8 +110,12 @@ images = []
 
 
 if args.subparser == "stitch":
-    images = [[file] for file in os.listdir(args.input)]
+    for file in args.input:
+        if not os.path.exists(file):
+            failed.append("couldn't find {file}".format(file=file))
+    images = [[file] for file in args.input]
 elif args.subparser == "deck":
+    back_output = args.back_output
     if args.deck.startswith("https://"):
         if args.deck.startswith("https://archidekt.com/decks/"):
             archidekt_id = args.deck[8:].split("/")[2]
@@ -159,6 +166,8 @@ elif args.subparser == "deck":
         else:
             if not args.basic_lands and "Basic Land" in card["type_line"]:
                 continue
+            # currently assumes download will succeed which is usually true
+            # this doesn't (and can't) handle if we can't find a card because its mispelled or similar
             da_uris = [scryfall.get_image(uris["png"]) for uris in card.image_uris]
         images.append(da_uris) 
 
@@ -192,4 +201,4 @@ if failed:
 
 
 
-print_cards(images, args.output, dfc_mode=mode, papersize=page_size, cardsize=card_size, card_spacing=card_spacing, bleed=bleed_edge, back_output=args.back_output)
+print_cards(images, args.output, dfc_mode=mode, papersize=page_size, cardsize=card_size, card_spacing=card_spacing, bleed=bleed_edge, back_output=back_output, show_guide=args.guide)

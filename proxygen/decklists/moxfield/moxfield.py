@@ -10,7 +10,7 @@ def parse_decklist(moxfield_id: str, zones: Sequence[str] = ("commander", "mainb
     r = requests.get(f"https://api2.moxfield.com/v3/decks/all/{moxfield_id}", headers=scryfall.headers)
 
     if r.status_code != 200:
-        raise ValueError(f"Archidekt returned status code {r.status_code}")
+        raise ValueError(f"Moxfield returned status code {r.status_code}")
 
     data = r.json()
 
